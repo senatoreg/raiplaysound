@@ -1,5 +1,4 @@
-import os
-import tempfile
+from sys import stderr
 from datetime import datetime as dt
 from datetime import timedelta
 from itertools import chain
@@ -126,10 +125,10 @@ class RaiParser:
         rdata = result.json()
         typology = rdata["podcast_info"].get("typology", "").lower()
         if skip_programmi and (typology in ("programmi radio", "informazione notiziari")):
-            print(f"Skipped programmi: {self.url} ({typology})")
+            print(f"Skipped: {self.url}", file=stderr)
             return []
         if skip_film and (typology in ("film", "fiction")):
-            print(f"Skipped film: {self.url} ({typology})")
+            print(f"Skipped: {self.url}", file=stderr)
             return []
         for tab in rdata["tab_menu"]:
             if tab["content_type"] == "playlist":
@@ -137,7 +136,7 @@ class RaiParser:
         feed = Feed()
         self._json_to_feed(feed, rdata)
         if not feed.items and not self.inner:
-            print(f"Empty: {self.url}")
+            print(f"Empty: {self.url}", file=stderr)
         if feed.items:
             if not date_ok and all([item.update for item in feed.items]):
                 # Try to fix the update timestamp
