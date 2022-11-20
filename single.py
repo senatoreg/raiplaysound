@@ -87,8 +87,6 @@ class RaiParser:
             # Keep original ordering by tweaking update seconds
             # Fix time in case of bad ordering
             dupdate = _datetime_parser(item["create_date"] + " " + item["create_time"])
-            if dupdate <= last_update:
-                dupdate = last_update + timedelta(seconds=1)
             fitem.update = dupdate
             last_update = dupdate
             fitem.url = urljoin(self.url, item["track_info"]["page_url"])
