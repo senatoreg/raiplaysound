@@ -164,6 +164,7 @@ def main():
         description="Genera un RSS da un programma di RaiPlaySound.",
         epilog="Info su https://github.com/timendum/raiplaysound/",
     )
+    parser.add_argument("url", help="URL di un podcast (o playlist) su raiplaysound.")
     parser.add_argument(
         "--film",
         help="Elabora il podcast anche se sembra un film.",
@@ -175,10 +176,8 @@ def main():
         action="store_true",
     )
 
-    base_url = "https://www.raiplaysound.it/programmi/"
-    url = splitext(basename(__file__))[0]
     args = parser.parse_args()
-    parser = RaiParser(base_url + url)
+    parser = RaiParser(args.url)
     parser.process(skip_programmi=not args.programma, skip_film=not args.film)
 
 
