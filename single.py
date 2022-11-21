@@ -1,12 +1,14 @@
-from sys import stder
 from datetime import datetime as dt
-from datetime import timedelta
 from itertools import chain
 from os.path import join as pathjoin
-from urllib.parse import urljoin
+from typing import List, Optional
+from urllib.parse import urljoin, urlparse
 
+import logging
 import requests
 from feedendum import Feed, FeedItem, to_rss_string
+
+logger = logging.getLogger('raiplaysound-feedrss')
 
 NSITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 
@@ -80,11 +82,25 @@ class RaiParser:
             pass
         if not feed.update:
             feed.update = _datetime_parser(rdata["track_info"]["date"])
-        for item in cards:
+        for item in rdata["block"]["cards"]:
             if "/playlist/" in item.get("weblink", ""):
                 self.extend(item["weblink"])
-            if not item.get("audio", None):
-                continue
+            if not item.get("downloadable_audio", None):
+                logger.debug("Missing downloadable audio url in \"{i}\"".format(i=item["title"]))
+                uri = urlparse(self.url)
+                path_id = item["path_id"]
+                result = requests.get(f"{uri.scheme}://{uri.netloc}/" + path_id)
+                try:
+                    result.raise_for_status()
+                except requests.HTTPError as e:
+                    logger.error(f"Error with {uri}/{path_id}: {e}")
+                    continue
+                item0 = result.json()
+                if not item0.get("downloadable_audio", None):
+                    continue
+                audio_url = item0["downloadable_audio"]["url"]
+            else:
+                audio_url = item["downloadable_audio"]["url"]
             fitem = FeedItem()
             fitem.title = item["toptitle"]
             fitem.id = "timendum-raiplaysound-" + item["uniquename"]
@@ -97,7 +113,7 @@ class RaiParser:
             fitem._data = {
                 "enclosure": {
                     "@type": "audio/mpeg",
-                    "@url": urljoin(self.url, item["downloadable_audio"]["url"] if "downloadable_audio" in item else item["audio"]["url"]),
+                    "@url": urljoin(self.url, audio_url),
                 },
                 f"{NSITUNES}title": fitem.title,
                 f"{NSITUNES}summary": fitem.content,
@@ -120,15 +136,15 @@ class RaiParser:
         try:
             result.raise_for_status()
         except requests.HTTPError as e:
-            print(f"Error with {self.url}: {e}")
+            logger.error(f"Error with {self.url}: {e}")
             return self.inner
         rdata = result.json()
         typology = rdata["podcast_info"].get("typology", "").lower()
         if skip_programmi and (typology in ("programmi radio", "informazione notiziari")):
-            print(f"Skipped: {self.url}", file=stderr)
+            logger.debug(f"Skipped: {self.url}")
             return []
         if skip_film and (typology in ("film", "fiction")):
-            print(f"Skipped: {self.url}", file=stderr)
+            logger.debug(f"Skipped: {self.url}")
             return []
         for tab in rdata["tab_menu"]:
             if tab["content_type"] == "playlist":
@@ -136,7 +152,7 @@ class RaiParser:
         feed = Feed()
         self._json_to_feed(feed, rdata)
         if not feed.items and not self.inner:
-            print(f"Empty: {self.url}", file=stderr)
+            logger.debug(f"Empty: {self.url}")
         if feed.items:
             if not date_ok and all([item.update for item in feed.items]):
                 # Try to fix the update timestamp
@@ -177,24 +193,25 @@ class RaiParser:
                     )
             else:
                 feed.sort_items()
-            filename = pathjoin(self.folderPath, url_to_filename(self.url))
-            atomic_write(filename, to_rss_string(feed))
-            print(f"Written {filename}")
+            filename = url_to_filename(self.url)
+            with open(pathjoin(self.folderPath, filename), "w", encoding="utf8") as wo:
+                wo.write(to_rss_string(feed))
+            logger.info(f"Written {pathjoin(self.folderPath, filename)}")
         return [feed] + self.inner
 
 
-def atomic_write(filename, content: str):
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf8",
-        delete=False,
-        dir=os.path.dirname(filename),
-        prefix=".tmp-single-",
-        suffix=".xml",
-    )
-    tmp.write(content)
-    tmp.close()
-    os.replace(tmp.name, filename)
+loglevel_defs = {
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "debug": logging.DEBUG,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+    "fatal": logging.FATAL
+}
+
+
+def to_loglevel(x):
+    return loglevel_defs[x]
 
 
 def main():
@@ -219,17 +236,19 @@ def main():
         action="store_true",
     )
     parser.add_argument(
-        "--dateok",
-        help="Lascia inalterata la data di pubblicazione degli episodi.",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--reverse",
-        help="Ordina gli episodi dal più recente al meno recente.",
-        action="store_true",
+        "--loglevel", "-l",
+        dest="loglevel",
+        action="store",
+        default="error", type=str,
+        choices=loglevel_defs.keys(),
+        help="log level"
     )
 
     args = parser.parse_args()
+
+    logging.basicConfig(level=to_loglevel(args.loglevel))
+    logger.setLevel(to_loglevel(args.loglevel))
+
     parser = RaiParser(args.url, args.folder)
     parser.process(
         skip_programmi=not args.programma,

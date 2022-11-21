@@ -1,16 +1,15 @@
 #!/usr/bin/python3
-from sys import stdout, stderr
+from sys import stdout
 from datetime import datetime as dt
-from datetime import timedelta
 from itertools import chain
-from os.path import join as pathjoin
-from os.path import basename
-from os.path import splitext
 from typing import List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
+import logging
 import requests
 from feedendum import to_rss_string, Feed, FeedItem
+
+logger = logging.getLogger('raiplaysound-feedrss')
 
 NSITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 
@@ -78,12 +77,25 @@ class RaiParser:
         feed.update = _datetime_parser(rdata["block"]["update_date"])
         if not feed.update:
             feed.update = _datetime_parser(rdata["track_info"]["date"])
-        last_update = dt.fromtimestamp(0)
         for item in rdata["block"]["cards"]:
             if "/playlist/" in item.get("weblink", ""):
                 self.extend(item["weblink"])
-            if not item.get("audio", None):
-                continue
+            if not item.get("downloadable_audio", None):
+                logger.debug("Missing downloadable audio url in \"{i}\"".format(i=item["title"]))
+                uri = urlparse(self.url)
+                path_id = item["path_id"]
+                result = requests.get(f"{uri.scheme}://{uri.netloc}/" + path_id)
+                try:
+                    result.raise_for_status()
+                except requests.HTTPError as e:
+                    logger.error(f"Error with {uri}/{path_id}: {e}")
+                    continue
+                item0 = result.json()
+                if not item0.get("downloadable_audio", None):
+                    continue
+                audio_url = item0["downloadable_audio"]["url"]
+            else:
+                audio_url = item["downloadable_audio"]["url"]
             fitem = FeedItem()
             fitem.title = item["toptitle"]
             fitem.id = "timendum-raiplaysound-" + item["uniquename"]
@@ -91,13 +103,12 @@ class RaiParser:
             # Fix time in case of bad ordering
             dupdate = _datetime_parser(item["create_date"] + " " + item["create_time"])
             fitem.update = dupdate
-            last_update = dupdate
             fitem.url = urljoin(self.url, item["track_info"]["page_url"])
             fitem.content = item.get("description", item["title"])
             fitem._data = {
                 "enclosure": {
                     "@type": "audio/mpeg",
-                    "@url": urljoin(self.url, item["downloadable_audio"]["url"] if "downloadable_audio" in item else item["audio"]["url"]),
+                    "@url": urljoin(self.url, audio_url),
                 },
                 f"{NSITUNES}title": fitem.title,
                 f"{NSITUNES}summary": fitem.content,
@@ -114,15 +125,15 @@ class RaiParser:
         try:
             result.raise_for_status()
         except requests.HTTPError as e:
-            print(f"Error with {self.url}: {e}")
+            logger.error(f"Error with {self.url}: {e}")
             return self.inner
         rdata = result.json()
         typology = rdata["podcast_info"].get("typology", "").lower()
         if skip_programmi and (typology in ("programmi radio", "informazione notiziari")):
-            print(f"Skipped: {self.url}", file=stderr)
+            logger.debug(f"Skipped: {self.url}")
             return []
         if skip_film and (typology in ("film", "fiction")):
-            print(f"Skipped: {self.url}", file=stderr)
+            logger.debug(f"Skipped: {self.url}")
             return []
         for tab in rdata["tab_menu"]:
             if tab["content_type"] == "playlist":
@@ -130,7 +141,7 @@ class RaiParser:
         feed = Feed()
         self._json_to_feed(feed, rdata)
         if not feed.items and not self.inner:
-            print(f"Empty: {self.url}", file=stderr)
+            logger.debug(f"Empty: {self.url}")
         if feed.items:
             if all([i._data.get(f"{NSITUNES}episode") for i in feed.items]) and all(
                 [i._data.get(f"{NSITUNES}season") for i in feed.items]
@@ -155,6 +166,20 @@ class RaiParser:
         return [feed] + self.inner
 
 
+loglevel_defs = {
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "debug": logging.DEBUG,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+    "fatal": logging.FATAL
+}
+
+
+def to_loglevel(x):
+    return loglevel_defs[x]
+
+
 def main():
     import argparse
 
@@ -173,8 +198,20 @@ def main():
         help="Elabora il podcast anche se sembra un programma radio/tv.",
         action="store_true",
     )
+    parser.add_argument(
+        "--loglevel", "-l",
+        dest="loglevel",
+        action="store",
+        default="error", type=str,
+        choices=loglevel_defs.keys(),
+        help="log level"
+    )
 
     args = parser.parse_args()
+
+    logging.basicConfig(level=to_loglevel(args.loglevel))
+    logger.setLevel(to_loglevel(args.loglevel))
+
     parser = RaiParser(args.url)
     parser.process(skip_programmi=not args.programma, skip_film=not args.film)
 
