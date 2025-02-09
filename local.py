@@ -2,12 +2,12 @@
 from sys import stdout
 from datetime import datetime as dt
 from itertools import chain
-from typing import List, Optional
+from typing import List
 from urllib.parse import urljoin, urlparse
 
 import logging
 import requests
-from feedendum import to_rss_string, Feed, FeedItem
+from feedendum import Feed, FeedItem, to_rss_string
 
 logger = logging.getLogger('raiplaysound-feedrss')
 
@@ -18,7 +18,7 @@ def url_to_filename(url: str) -> str:
     return url.split("/")[-1] + ".xml"
 
 
-def _datetime_parser(s: str) -> Optional[dt]:
+def _datetime_parser(s: str) -> dt | None:
     if not s:
         return None
     try:
@@ -39,7 +39,7 @@ def _datetime_parser(s: str) -> Optional[dt]:
 class RaiParser:
     def __init__(self, url: str) -> None:
         self.url = url
-        self.inner: List[Feed] = []
+        self.inner: list[Feed] = []
 
     def extend(self, url: str) -> None:
         url = urljoin(self.url, url)
@@ -50,7 +50,7 @@ class RaiParser:
         parser = RaiParser(url)
         self.inner.extend(parser.process())
 
-    def _json_to_feed(self, feed: Feed, rdata) -> List[Feed]:
+    def _json_to_feed(self, feed: Feed, rdata) -> None:
         feed.title = rdata["title"]
         feed.description = rdata["podcast_info"].get("description", "")
         feed.description = feed.description or rdata["title"]
@@ -74,7 +74,12 @@ class RaiParser:
         except KeyError:
             pass
         feed._data[f"{NSITUNES}category"] = [{"@text": c} for c in categories]
-        feed.update = _datetime_parser(rdata["block"]["update_date"])
+        cards = []
+        try:
+            feed.update = _datetime_parser(rdata["block"]["update_date"])
+            cards = rdata["block"]["cards"]
+        except KeyError:
+            pass
         if not feed.update:
             feed.update = _datetime_parser(rdata["track_info"]["date"])
         for item in rdata["block"]["cards"]:
@@ -115,12 +120,18 @@ class RaiParser:
                 f"{NSITUNES}duration": item["audio"]["duration"],
                 "image": {"url": urljoin(self.url, item["image"])},
             }
+            if item.get("downloadable_audio", None) and item["downloadable_audio"].get("url", None):
+                fitem._data["enclosure"]["@url"] = urljoin(
+                    self.url, item["downloadable_audio"]["url"]
+                ).replace("http:", "https:")
             if item.get("season", None) and item.get("episode", None):
                 fitem._data[f"{NSITUNES}season"] = item["season"]
                 fitem._data[f"{NSITUNES}episode"] = item["episode"]
             feed.items.append(fitem)
 
-    def process(self, skip_programmi=True, skip_film=True) -> List[Feed]:
+    def process(
+            self, skip_programmi=True, skip_film=True, date_ok=False, reverse=False
+    ) -> List[Feed]:
         result = requests.get(self.url + ".json")
         try:
             result.raise_for_status()
@@ -142,6 +153,25 @@ class RaiParser:
         self._json_to_feed(feed, rdata)
         if not feed.items and not self.inner:
             logger.debug(f"Empty: {self.url}")
+            if not date_ok and all([item.update for item in feed.items]):
+                # Try to fix the update timestamp
+                dates = [i.update.date() for i in feed.items]
+                increasing = all(map(lambda a, b: b >= a, dates[0:-1], dates[1:]))
+                decreasing = all(map(lambda a, b: b <= a, dates[0:-1], dates[1:]))
+                if increasing and not decreasing:
+                    # Dates never decrease
+                    last_update = dt.fromtimestamp(0)
+                    for item in feed.items:
+                        if item.update <= last_update:
+                            item.update = last_update + dt.timedelta(seconds=1)
+                        last_update = item.update
+                elif decreasing and not increasing:
+                    # Dates never decrease
+                    last_update = feed.items[0].update + dt.timedelta(seconds=1)
+                    for item in feed.items:
+                        if item.update >= last_update:
+                            item.update = last_update - dt.timedelta(seconds=1)
+                        last_update = item.update
         if feed.items:
             if all([i._data.get(f"{NSITUNES}episode") for i in feed.items]) and all(
                 [i._data.get(f"{NSITUNES}season") for i in feed.items]
@@ -158,11 +188,13 @@ class RaiParser:
                         feed.items,
                         key=lambda e: str(e._data[f"{NSITUNES}season"]).zfill(5)
                         + str(e._data[f"{NSITUNES}episode"]).zfill(5),
+                        reverse=reverse,
                     )
             else:
                 feed.sort_items()
             stdout.write(to_rss_string(feed))
             stdout.flush()
+            logger.info("Written to stdout")
         return [feed] + self.inner
 
 
@@ -213,7 +245,12 @@ def main():
     logger.setLevel(to_loglevel(args.loglevel))
 
     parser = RaiParser(args.url)
-    parser.process(skip_programmi=not args.programma, skip_film=not args.film)
+    parser.process(
+        skip_programmi=not args.programma,
+        skip_film=not args.film,
+        date_ok=args.dateok,
+        reverse=args.reverse,
+    )
 
 
 if __name__ == "__main__":
