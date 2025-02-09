@@ -226,6 +226,16 @@ def main():
         action="store_true",
     )
     parser.add_argument(
+        "--dateok",
+        help="Elabora le date del feed.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--reverse",
+        help="Inverte l'ordine dei feed.",
+        action="store_true",
+    )
+    parser.add_argument(
         "--programma",
         help="Elabora il podcast anche se sembra un programma radio/tv.",
         action="store_true",
