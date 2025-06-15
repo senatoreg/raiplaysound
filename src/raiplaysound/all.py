@@ -1,30 +1,28 @@
-import argparse
-
 from os import makedirs, path
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
-from single import RaiParser
+from raiplaysound.single import RaiParser
 
 GENERI_URL = "https://www.raiplaysound.it/generi"
 SITEMAP_ENTRYPOINT = "https://www.raiplaysound.it/sitemap.archivio.indice.xml"
+PROGRAMMI_URL = "https://www.raiplaysound.it/programmi/"
+AUDIOLIBRI_URL = "https://www.raiplaysound.it/audiolibri/"
+PLAYLIST_URL = "https://www.raiplaysound.it/playlist/"
 
-REQ_TIMEOUT=3
+REQ_TIMEOUT = 3
 
 
 class RaiPlaySound:
     def __init__(self):
         self._urls = set()
-        self._base_path = path.join(path.dirname(path.abspath(__file__)), "dist")
+        self._base_path = path.join(".", "out")
         makedirs(self._base_path, exist_ok=True)
-        self.programmi_url = "https://www.raiplaysound.it/programmi/"
-        self.audiolibri_url = "https://www.raiplaysound.it/audiolibri/"
-        self.playlist_url = "https://www.raiplaysound.it/playlist/"
 
     def _get_locs_from_sitemap_url(self, sitemap_url: str) -> set[str]:
-        """Downloads sitemap from sitemap_url and returns all the urls contained in the <loc> tag."""
+        """Downloads sitemap from url and returns all urls contained in the <loc> tag."""
 
         urls = set()
         _r = requests.get(sitemap_url, timeout=REQ_TIMEOUT)
@@ -32,7 +30,7 @@ class RaiPlaySound:
         _xml = BeautifulSoup(_r.text, "xml")
         _sitemaps = _xml.find_all("sitemap")
         for item in _sitemaps:
-            url = item.findNext("loc").text
+            url = item.find_next("loc").text
             urls.add(url)
         return urls
 
@@ -62,13 +60,13 @@ class RaiPlaySound:
         sitemaps_url = self._get_locs_from_sitemap_url(SITEMAP_ENTRYPOINT)
 
         for url in sitemaps_url:
-            if 'programmi' in url:
-                self._get_url_from_sitemap(url, self.programmi_url)
-            elif 'audiolibri' in url:
-                self._get_url_from_sitemap(url, self.audiolibri_url)
-            elif 'playlist' in url:
-                self._get_url_from_sitemap(url, self.playlist_url)
-            elif 'generi' in url:
+            if "programmi" in url:
+                self._get_url_from_sitemap(url, PROGRAMMI_URL)
+            elif "audiolibri" in url:
+                self._get_url_from_sitemap(url, AUDIOLIBRI_URL)
+            elif "playlist" in url:
+                self._get_url_from_sitemap(url, PLAYLIST_URL)
+            elif "generi" in url:
                 self.parse_genere(url)
             else:
                 print(f"Unsupported sitemap: {url}")
@@ -80,31 +78,3 @@ class RaiPlaySound:
                 rai_parser.process(skip_programmi, skip_film)
             except Exception as e:
                 print(f"Error with {url}: {e}")
-
-
-def main(skip_programmi: bool, skip_film: bool):
-    dumper = RaiPlaySound()
-    dumper.parse_index()
-    dumper.create_feeds(skip_programmi, skip_film)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Genera un RSS per ogni programma disponibile su RaiPlaySound.",
-        epilog="Info su https://github.com/timendum/raiplaysound/",
-    )
-    parser.add_argument(
-        "--film",
-        help="Elabora il podcast anche se sembra un film.",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--programma",
-        help="Elabora il podcast anche se sembra un programma radio/tv.",
-        action="store_true",
-    )
-
-    args = parser.parse_args()
-    _skip_programmi = not args.programma
-    _skip_film = not args.film
-    main(_skip_programmi, _skip_film)

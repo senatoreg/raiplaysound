@@ -1,0 +1,33 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "raiplaysound"
+authors = [
+  {name = "Timendum"}
+]
+version = "0.5.0"
+description = "Podcast generator for RaiPlay Sound"
+readme = "README.md"
+requires-python = ">=3.12"
+license-files = ["LICENSE"]
+dependencies = [
+    "beautifulsoup4>=4.12.3,<5",
+    "feedendum>=0.4.0,<1",
+    "lxml>=5.3.0,<6",
+    "requests>=2.32.3,<3",
+    "soupsieve>=2.6,<3",
+]
+
+[project.urls]
+Repository = "https://github.com/timendum/raiplaysound"
+
+[project.scripts]
+raiplaysound = "raiplaysound.__main__:main"
+
+[tool.ruff]
+# Enable Pyflakes `E` and `F` codes by default.
+lint.select = ["E", "F", "W", "I", "N", "UP", "B", "G", "PIE", "TCH", "PLE", "PLW"]
+lint.ignore = []
+line-length = 100

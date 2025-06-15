@@ -20,25 +20,20 @@ def url_to_filename(url: str) -> str:
 def _datetime_parser(s: str) -> dt | None:
     if not s:
         return None
-    try:
-        return dt.strptime(s, "%d-%m-%Y %H:%M:%S")
-    except ValueError:
-        pass
-    try:
-        return dt.strptime(s, "%d-%m-%Y %H:%M")
-    except ValueError:
-        pass
-    try:
-        return dt.strptime(s, "%Y-%m-%d")
-    except ValueError:
-        pass
+    formats = ["%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%Y-%m-%d"]
+    for fmt in formats:
+        try:
+            return dt.strptime(s, fmt)
+        except ValueError:
+            pass
+    print("Unparsed ", s)
     return None
 
 
 class RaiParser:
-    def __init__(self, url: str, folderPath: str) -> None:
+    def __init__(self, url: str, folder_path: str) -> None:
         self.url = url
-        self.folderPath = folderPath
+        self.folderPath = folder_path
         self.inner: list[Feed] = []
 
     def extend(self, url: str) -> None:

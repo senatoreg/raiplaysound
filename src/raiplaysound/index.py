@@ -16,7 +16,7 @@ class Indexer:
     def __init__(self):
         self.entries = []
         self._seen_url = set()
-        self._base_path = Path(path.dirname(path.abspath(__file__)), "dist")
+        self._base_path = Path(path.join(".", "out"))
 
     def generate(self) -> None:
         xfiles = self._base_path.glob("*.xml")
@@ -44,7 +44,7 @@ class Indexer:
                     [feed._data["{http://www.itunes.com/dtds/podcast-1.0.dtd}category"]["@text"]],
                 )
             self.entries.append(e)
-        with open(path.join(path.dirname(path.abspath(__file__)), "index.template"), "r") as t:
+        with open(path.join(path.dirname(path.abspath(__file__)), "index.template")) as t:
             output = t.read()
         output = output.replace("%%lastupdate%%", date.today().isoformat())
         output = output.replace("%%list%%", self.generate_list())
@@ -103,12 +103,3 @@ class Indexer:
                 text += f'<p><a href="{v.file}">{escape(v.title)}</a> - {escape(v.text)}</p>\n'
             text += "</div>\n"
         return text
-
-
-def main():
-    indexer = Indexer()
-    indexer.generate()
-
-
-if __name__ == "__main__":
-    main()
